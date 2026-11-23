@@ -101,6 +101,19 @@ class ScreenshotCapturer {
 
   bool _cancelled = false;
 
+  // VIS-3122 (local patch, see PATCHES.md): set by [cancel] and cleared only
+  // by [resume]. [_cancelled] cannot carry a stop on its own: every capture
+  // clears it when it starts, so it only covers the capture that was in flight.
+  bool _stopped = false;
+
+  /// Whether a capture must stop before its next rasterizing call
+  /// (`toImage`, `toByteData`, `decodeImageFromPixels`). On Impeller OpenGL ES
+  /// a rasterization that runs after Android destroyed the render surface
+  /// crashes the raster thread (flutter/flutter#192365), and the host stops
+  /// recording exactly then. Every await in a capture can span that stop, so
+  /// each rasterizing call that follows an await re-checks this first.
+  bool get _halted => _cancelled || _stopped;
+
   bool hasCapturedPlatformViews = false;
 
   // Bumped whenever the per-session state is dropped. Frames name a session,
@@ -142,6 +155,12 @@ class ScreenshotCapturer {
 
   void cancel() {
     _cancelled = true;
+    _stopped = true;
+  }
+
+  /// Allows rasterizing again after [cancel], when recording restarts.
+  void resume() {
+    _stopped = false;
   }
 
   /// Drops all per-session snapshot state when [currentSessionId] differs from
@@ -580,6 +599,13 @@ class ScreenshotCapturer {
   }
 
   Future<ImageInfo?> _buildOcclusionPlaceholder() async {
+    // VIS-3122: the caller awaited the native bridge handshake, so recording
+    // may have stopped since. Checked before _resolveCaptureTarget, which would
+    // reset _cancelled and clear the pending dedup state of a frame still being
+    // sent; nothing below awaits before toImage().
+    if (_stopped) {
+      return null;
+    }
     final target = _resolveCaptureTarget();
     if (target == null) {
       return null;
@@ -615,7 +641,7 @@ class ScreenshotCapturer {
       picture.dispose();
     }
 
-    if (_cancelled || !placeholderImage.isValidSize) {
+    if (_halted || !placeholderImage.isValidSize) {
       placeholderImage.dispose();
       return null;
     }
@@ -627,7 +653,7 @@ class ScreenshotCapturer {
       placeholderImage.dispose();
     }
 
-    if (_cancelled || pngBytes == null || pngBytes.isEmpty) {
+    if (_halted || pngBytes == null || pngBytes.isEmpty) {
       return null;
     }
 
@@ -652,7 +678,7 @@ class ScreenshotCapturer {
     // below — whose post-await check would veto this capture on a prior flag.
     _cancelled = false;
     final state = await _nativeCommunicator.getSessionReplayState();
-    if (_cancelled) {
+    if (_halted) {
       return null;
     }
     if (!state.isActive) {
@@ -723,10 +749,16 @@ class ScreenshotCapturer {
           return;
         }
 
+        // endOfFrame above can complete after the host stopped recording.
+        if (_halted) {
+          completer.complete(null);
+          return;
+        }
+
         image = await renderObject.toImage(pixelRatio: pixelRatio);
 
         final currentImage = image;
-        if (_cancelled) {
+        if (_halted) {
           currentImage?.dispose();
           image = null;
           completer.complete(null);
@@ -755,7 +787,7 @@ class ScreenshotCapturer {
           currentImage,
           format: ui.ImageByteFormat.rawRgba,
         );
-        if (_cancelled) {
+        if (_halted) {
           currentRecorder.endRecording().dispose();
           recorder = null;
           currentImage.dispose();
@@ -823,7 +855,7 @@ class ScreenshotCapturer {
           image = null;
         }
 
-        if (_cancelled) {
+        if (_halted) {
           currentRecorder.endRecording().dispose();
           recorder = null;
           completer.complete(null);
@@ -851,13 +883,20 @@ class ScreenshotCapturer {
               .toList();
           final bytesList =
               await _nativeCommunicator.captureNativeScreenshots(specs);
-          if (_cancelled) {
+          if (_halted) {
             currentRecorder.endRecording().dispose();
             recorder = null;
             completer.complete(null);
             return;
           }
           for (var i = 0; i < pvRects.captured.length; i++) {
+            // Each composite awaits a pixel decode, which uploads a texture.
+            if (_halted) {
+              currentRecorder.endRecording().dispose();
+              recorder = null;
+              completer.complete(null);
+              return;
+            }
             final spec = specs[i];
             final bytes = i < bytesList.length ? bytesList[i] : null;
             await _compositeRevealedView(canvas, pvRects.captured[i], bytes,
@@ -873,12 +912,19 @@ class ScreenshotCapturer {
           completer.complete(null);
           return;
         }
+        // The native screenshot round trip and the decodes above can span a stop.
+        if (_halted) {
+          currentPicture.dispose();
+          picture = null;
+          completer.complete(null);
+          return;
+        }
 
         try {
           finalImage = await currentPicture.toImage(imageWidth, imageHeight);
 
           final currentFinalImage = finalImage;
-          if (_cancelled) {
+          if (_halted) {
             currentFinalImage?.dispose();
             finalImage = null;
             completer.complete(null);
@@ -896,7 +942,7 @@ class ScreenshotCapturer {
             _pendingImageBytesHash = preMaskHash;
 
             final pngBytes = await _getImageBytes(currentFinalImage);
-            if (_cancelled || pngBytes == null || pngBytes.isEmpty) {
+            if (_halted || pngBytes == null || pngBytes.isEmpty) {
               completer.complete(null);
               return;
             }

@@ -239,6 +239,8 @@ class PostHogWidgetState extends State<PostHogWidget> {
       _initComponents(config);
     }
 
+    // VIS-3122 (local patch): lifts the stop that _stopRecording put on captures.
+    _screenshotCapturer?.resume();
     _changeDetector?.start();
   }
 
