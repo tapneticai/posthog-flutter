@@ -67,7 +67,11 @@ android {
         testImplementation 'org.robolectric:robolectric:4.14.1'
         testImplementation 'junit:junit:4.13.2'
         testRuntimeOnly 'org.junit.vintage:junit-vintage-engine:5.10.1'
-        implementation 'com.posthog:posthog-android:[3.75.0,4.0.0)'
+        // VIS-3122 (local patch, see PATCHES.md): exact pin instead of upstream's
+        // [3.75.0,4.0.0), so a rebuild cannot pick up new native replay code.
+        implementation('com.posthog:posthog-android') {
+            version { strictly '3.77.1' }
+        }
     }
 
     testOptions {
