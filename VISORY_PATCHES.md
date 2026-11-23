@@ -10,6 +10,12 @@ git log --oneline 5.58.4..visory/5.58.4-vis3122
 git diff 5.58.4..visory/5.58.4-vis3122 -- posthog_flutter
 ```
 
+The same patches are carried on this fork's `main` (merged from
+`visory/main-vis3122`, cut from upstream 5.61.3). There, the posthog-android pin
+replaces upstream's `[3.77.0,4.0.0)`, and the version is 5.61.3, so Visory's
+compile-time check fails until the gate is re-checked on that version. Visory
+itself still pins `visory/5.58.4-vis3122` (tag `visory-5.58.4-vis3122.1`).
+
 Visory's `PosthogController` checks `postHogFlutterVersion` and
 `posthogFlutterLocalPatches` at compile time. A version bump or a switch back
 to the hosted package fails its build until the replay surface gate (VIS-2665)
