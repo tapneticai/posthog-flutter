@@ -54,10 +54,11 @@ in the post-frame callback, so this window did not exist there.
 - `PostHogWidgetState._startRecording()` calls `resume()` before restarting the
   change detector.
 
-**Check.** The repo keeps no unit tests for this patch, and the fork
-ships without upstream's test suites. Verify it on a device with the VIS-3119
-repro: Galaxy A505, replay on, power key right after three onboarding pages,
-20 attempts, no crash.
+**Check.** Neither Visory nor this branch has a unit test for this patch;
+upstream's own suites (`test/`, `android/src/test/`) are still here unchanged.
+Verify it on a device with the VIS-3119 repro: Galaxy A505, replay on, power key
+right after three onboarding pages, 20 attempts, no crash. On 2026-11-23 the
+unpatched build crashed in 7 of 20 attempts and the patched one in 0 of 30.
 
 **Drop it when** upstream re-checks cancellation before each rasterizing call
 after an await, or when flutter/flutter#192365 is fixed in the Flutter version
